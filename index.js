@@ -1,50 +1,83 @@
-
-const express = require('express');
-const axios = require('axios');
-const bodyParser = require('body-parser');
-require('dotenv').config();
-
+const express = require("express");
+const axios = require("axios");
 const app = express();
-const PORT = process.env.PORT || 3000;
 
-app.use(bodyParser.json());
+app.use(express.json());
 
-app.post('/', async (req, res) => {
-    console.log("🔔 Webhook hit from Zoho:");
-    console.log("📩 Payload:", req.body);
+const OPENAI_API_KEY = "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; // Replace with your OpenAI secret key
+const ASSISTANT_ID = "asst_9rMkmRVBXUZzX8SQwN9iD9RW";
 
-    const userInput = req.body.text || req.body.question || "Hello";
+app.post("/", async (req, res) => {
+  const question = req.body.question || req.body.input || req.body.text || req.body.message;
 
-    const systemPrompt = `
-You are a smart support assistant for Gaura Electric Vehicles. You must only respond based on Gaura's official documents, product specs, warranty policies, and service info.
-If you're unsure, reply in Tamil: 'மன்னிக்கவும், தயவுசெய்து எங்கள் டீலர்ஷிப்‑ஐத் தொடர்பு கொள்ளவும்.'
-`;
+  try {
+    // Step 1: Create thread
+    const threadRes = await axios.post("https://api.openai.com/v1/threads", {}, {
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "OpenAI-Beta": "assistants=v2",
+        "Content-Type": "application/json"
+      }
+    });
+    const thread_id = threadRes.data.id;
 
-    try {
-        const response = await axios.post("https://api.openai.com/v1/chat/completions", {
-            model: "gpt-4o-mini",
-            messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: userInput }
-            ]
-        }, {
-            headers: {
-                Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-                "Content-Type": "application/json"
-            }
-        });
+    // Step 2: Add message to thread
+    await axios.post(`https://api.openai.com/v1/threads/${thread_id}/messages`, {
+      role: "user",
+      content: question
+    }, {
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "OpenAI-Beta": "assistants=v2",
+        "Content-Type": "application/json"
+      }
+    });
 
-        const reply = response.data.choices[0].message.content;
-        console.log("✅ GPT Reply:", reply);
+    // Step 3: Run the assistant
+    const runRes = await axios.post(`https://api.openai.com/v1/threads/${thread_id}/runs`, {
+      assistant_id: ASSISTANT_ID
+    }, {
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "OpenAI-Beta": "assistants=v2",
+        "Content-Type": "application/json"
+      }
+    });
 
-        res.json({ replies: [reply] });
+    const run_id = runRes.data.id;
 
-    } catch (err) {
-        console.error("❌ GPT Error:", err.message);
-        res.json({ replies: ["மன்னிக்கவும், சேவையில் சிக்கல் ஏற்பட்டது. பிறகு முயற்சிக்கவும்."] });
+    // Step 4: Poll until the run completes
+    let status = "in_progress";
+    while (status !== "completed") {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const statusRes = await axios.get(`https://api.openai.com/v1/threads/${thread_id}/runs/${run_id}`, {
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "OpenAI-Beta": "assistants=v2"
+        }
+      });
+      status = statusRes.data.status;
     }
+
+    // Step 5: Retrieve assistant message
+    const msgRes = await axios.get(`https://api.openai.com/v1/threads/${thread_id}/messages`, {
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "OpenAI-Beta": "assistants=v2"
+      }
+    });
+
+    const assistantMsg = msgRes.data.data.find(msg => msg.role === "assistant");
+    const reply = assistantMsg.content[0]?.text?.value || "No response from assistant.";
+
+    res.json({ reply });
+  } catch (err) {
+    console.error(err?.response?.data || err.message);
+    res.status(500).json({ reply: "Sorry, something went wrong. Please try again later." });
+  }
 });
 
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`✅ Webhook live on port ${PORT}`);
 });
