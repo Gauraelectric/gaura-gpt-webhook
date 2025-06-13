@@ -1,3 +1,23 @@
+const express = require("express");
+const bodyParser = require("body-parser");
+
+const app = express();
+const port = process.env.PORT || 3000;
+
+app.use(bodyParser.json());
+
+// Catch unexpected errors
+process.on("uncaughtException", (err) => {
+  console.error("❌ UNCAUGHT EXCEPTION:", err.stack || err);
+});
+
+// Root health-check route
+app.get("/", (req, res) => {
+  console.log("🟢 GET / hit");
+  res.send("🧪 Test server running");
+});
+
+// Zobot webhook route
 app.post("/webhook", (req, res) => {
   console.log("📩 Webhook called!");
   console.log("🔍 Request body:", JSON.stringify(req.body, null, 2));
@@ -11,20 +31,25 @@ app.post("/webhook", (req, res) => {
       replies: [
         {
           type: "text",
-          value: "👋 Welcome to Gaura Electric! I'm here to assist you—ask me anything about our scooters or services."
+          value: "👋 Welcome to Gaura Electric! I'm your AI assistant—ask me anything about scooters, batteries, or features."
         }
       ]
     });
   }
 
-  // Optional fallback if it's a different handler (e.g. message)
-  return res.json({
+  // Optional: respond to other handlers like 'message'
+  res.json({
     action: "reply",
     replies: [
       {
         type: "text",
-        value: "⚠️ Unknown handler type received."
+        value: "⚠️ Received unsupported handler. I'm listening though!"
       }
     ]
   });
+});
+
+// Start server
+app.listen(port, () => {
+  console.log(`✅ Server running on port ${port}`);
 });
