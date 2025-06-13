@@ -1,83 +1,68 @@
 const express = require("express");
-const axios = require("axios");
+const bodyParser = require("body-parser");
+const dotenv = require("dotenv");
+const { OpenAI } = require("openai");
+const cors = require("cors");
+
+dotenv.config();
 const app = express();
+const port = process.env.PORT || 3000;
 
-app.use(express.json());
+app.use(cors());
+app.use(bodyParser.json());
 
-const OPENAI_API_KEY = "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; // Replace with your OpenAI secret key
-const ASSISTANT_ID = "asst_9rMkmRVBXUZzX8SQwN9iD9RW";
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
-app.post("/", async (req, res) => {
-  const question = req.body.question || req.body.input || req.body.text || req.body.message;
-
+app.post("/webhook", async (req, res) => {
   try {
-    // Step 1: Create thread
-    const threadRes = await axios.post("https://api.openai.com/v1/threads", {}, {
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "OpenAI-Beta": "assistants=v2",
-        "Content-Type": "application/json"
-      }
-    });
-    const thread_id = threadRes.data.id;
+    const userInput = req.body.text || req.body.message || req.body.query;
 
-    // Step 2: Add message to thread
-    await axios.post(`https://api.openai.com/v1/threads/${thread_id}/messages`, {
-      role: "user",
-      content: question
-    }, {
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "OpenAI-Beta": "assistants=v2",
-        "Content-Type": "application/json"
-      }
-    });
-
-    // Step 3: Run the assistant
-    const runRes = await axios.post(`https://api.openai.com/v1/threads/${thread_id}/runs`, {
-      assistant_id: ASSISTANT_ID
-    }, {
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "OpenAI-Beta": "assistants=v2",
-        "Content-Type": "application/json"
-      }
-    });
-
-    const run_id = runRes.data.id;
-
-    // Step 4: Poll until the run completes
-    let status = "in_progress";
-    while (status !== "completed") {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      const statusRes = await axios.get(`https://api.openai.com/v1/threads/${thread_id}/runs/${run_id}`, {
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "OpenAI-Beta": "assistants=v2"
-        }
-      });
-      status = statusRes.data.status;
+    if (!userInput) {
+      return res.status(400).json({ error: "Missing user input" });
     }
 
-    // Step 5: Retrieve assistant message
-    const msgRes = await axios.get(`https://api.openai.com/v1/threads/${thread_id}/messages`, {
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "OpenAI-Beta": "assistants=v2"
-      }
+    // Step 1: Create a new thread
+    const thread = await openai.beta.threads.create();
+
+    // Step 2: Add the user's message to the thread
+    await openai.beta.threads.messages.create(thread.id, {
+      role: "user",
+      content: userInput,
     });
 
-    const assistantMsg = msgRes.data.data.find(msg => msg.role === "assistant");
-    const reply = assistantMsg.content[0]?.text?.value || "No response from assistant.";
+    // Step 3: Run the assistant on the thread
+    const run = await openai.beta.threads.runs.create(thread.id, {
+      assistant_id: process.env.OPENAI_ASSISTANT_ID,
+    });
+
+    // Step 4: Poll until the run completes
+    let result;
+    while (true) {
+      result = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+      if (result.status === "completed") break;
+      if (result.status === "failed") {
+        return res.status(500).json({ error: "Assistant run failed" });
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+
+    // Step 5: Retrieve the final messages
+    const messages = await openai.beta.threads.messages.list(thread.id);
+    const finalMessage = messages.data.find((msg) => msg.role === "assistant");
+
+    const reply =
+      finalMessage?.content?.[0]?.text?.value ||
+      "Sorry, I couldn't find the answer. Please check with our dealership.";
 
     res.json({ reply });
   } catch (err) {
-    console.error(err?.response?.data || err.message);
-    res.status(500).json({ reply: "Sorry, something went wrong. Please try again later." });
+    console.error("Error in webhook:", err);
+    res.status(500).json({ error: "Failed to process request." });
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`✅ Webhook live on port ${PORT}`);
+app.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
 });
