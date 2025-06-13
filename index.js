@@ -6,65 +6,71 @@ const port = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
-// Log any uncaught exceptions to catch hidden errors.
-process.on("uncaughtException", (err) => {
-  console.error("❌ UNCAUGHT EXCEPTION:", err.stack || err);
-});
-
-// Health-check route
+// Health-check route for quick testing
 app.get("/", (req, res) => {
   console.log("🟢 GET / hit");
-  res.send("Minimal server running");
+  res.send("Server is running.");
 });
 
-// Main webhook endpoint for Zoho SalesIQ.
+// Main webhook endpoint for Zoho SalesIQ
 app.post("/webhook", (req, res) => {
   console.log("📩 Webhook called!");
   console.log("🔍 Request body:", JSON.stringify(req.body, null, 2));
 
-  const handlerType = req.body?.handler;
+  const handler = req.body.handler;
 
-  if (handlerType === "trigger") {
+  if (handler === "trigger") {
+    // For welcome events—SalesIQ is expecting a simple welcome message.
     console.log("✨ Trigger event received – sending welcome message!");
-    // Reply payload with both reply text and some suggestions.
     return res.status(200).json({
       action: "reply",
       replies: [
         {
           type: "text",
-          value:
-            "Welcome to Gaura Electric! I'm your digital assistant. Please explore our scooters, battery tech, and more. How can I help you today?"
+          value: "Welcome to Gaura Electric! I'm your digital assistant. How can I help you today?"
         }
-      ],
-      suggestions: [
-        { type: "text", value: "View Scooters" },
-        { type: "text", value: "Know Battery Tech" },
-        { type: "text", value: "Book Test Ride" }
       ]
     });
-  } else if (handlerType === "message") {
-    console.log("💬 Message event received – sending message reply.");
+  } else if (handler === "message") {
+    // For messages (visitor-initiated)
+    const question = req.body.question;
+    console.log("💬 Message event received – question:", question);
+
+    if (question && question.trim() !== "") {
+      // Process the question as needed. For now, echoing it.
+      return res.status(200).json({
+        action: "reply",
+        replies: [
+          {
+            type: "text",
+            value: `You asked: ${question}`
+          }
+        ]
+      });
+    } else {
+      // Fallback when no valid question is received.
+      return res.status(200).json({
+        action: "reply",
+        replies: [
+          {
+            type: "text",
+            value: "I did not receive any question. Could you please type your query again?"
+          }
+        ]
+      });
+    }
+  } else {
+    console.log("⚠️ Unknown handler:", handler);
     return res.status(200).json({
       action: "reply",
       replies: [
         {
           type: "text",
-          value: "Thank you for your message. How can I assist you further?"
+          value: "Unknown handler. Please try again."
         }
       ]
     });
   }
-  
-  console.log("⚠️ Unknown handler:", handlerType);
-  return res.status(200).json({
-    action: "reply",
-    replies: [
-      {
-        type: "text",
-        value: "I'm not sure how to help with that."
-      }
-    ]
-  });
 });
 
 app.listen(port, () => {
