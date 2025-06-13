@@ -6,12 +6,12 @@ const port = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
-// Catch any uncaught exceptions to log them
+// Log any uncaught exceptions so we catch hidden errors
 process.on("uncaughtException", (err) => {
   console.error("❌ UNCAUGHT EXCEPTION:", err.stack || err);
 });
 
-// Root route for basic health check
+// Health-check route
 app.get("/", (req, res) => {
   console.log("🟢 GET / hit");
   res.send("Minimal server running");
@@ -23,10 +23,9 @@ app.post("/webhook", (req, res) => {
   console.log("🔍 Request body:", JSON.stringify(req.body, null, 2));
 
   const handlerType = req.body?.handler;
-
+  
   if (handlerType === "trigger") {
     console.log("✨ Trigger event received – sending minimal valid welcome message!");
-    // Minimal payload that SalesIQ should accept
     return res.status(200).json({
       action: "reply",
       replies: [
@@ -36,9 +35,20 @@ app.post("/webhook", (req, res) => {
         }
       ]
     });
+    
+  } else if (handlerType === "message") {
+    console.log("💬 Message event received – sending a response tailored for messages.");
+    return res.status(200).json({
+      action: "reply",
+      replies: [
+        {
+          type: "text",
+          value: "Thank you for your message. How may I assist you further?"
+        }
+      ]
+    });
   }
-
-  // Fallback for other handler types
+  
   console.log("⚠️ Unknown handler:", handlerType);
   return res.status(200).json({
     action: "reply",
