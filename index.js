@@ -6,17 +6,18 @@ const port = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
+// Catch any uncaught exceptions to log them
 process.on("uncaughtException", (err) => {
   console.error("❌ UNCAUGHT EXCEPTION:", err.stack || err);
 });
 
-// ✅ Root route for health check
+// Root route for basic health check
 app.get("/", (req, res) => {
   console.log("🟢 GET / hit");
-  res.send("🚀 Webhook is live");
+  res.send("Minimal server running");
 });
 
-// ✅ Webhook endpoint for Zoho SalesIQ
+// Webhook endpoint for Zoho SalesIQ
 app.post("/webhook", (req, res) => {
   console.log("📩 Webhook called!");
   console.log("🔍 Request body:", JSON.stringify(req.body, null, 2));
@@ -24,31 +25,27 @@ app.post("/webhook", (req, res) => {
   const handlerType = req.body?.handler;
 
   if (handlerType === "trigger") {
-    console.log("✨ Trigger event received – sending welcome message!");
+    console.log("✨ Trigger event received – sending minimal valid welcome message!");
+    // Minimal payload that SalesIQ should accept
     return res.status(200).json({
       action: "reply",
       replies: [
         {
           type: "text",
-          value: "👋 Welcome to Gaura Electric! I'm your AI assistant. Ask me anything about our scooters, batteries, or services."
+          value: "Welcome to Gaura Electric! Ask me anything about our scooters."
         }
-      ],
-      suggestions: [
-        { type: "text", value: "View scooters" },
-        { type: "text", value: "Battery warranty" },
-        { type: "text", value: "Book test ride" }
       ]
     });
   }
 
-  // Optional: fallback for other handlers
+  // Fallback for other handler types
   console.log("⚠️ Unknown handler:", handlerType);
   return res.status(200).json({
     action: "reply",
     replies: [
       {
         type: "text",
-        value: "I'm not sure how to respond to that yet, but I'm here to help!"
+        value: "Unknown request."
       }
     ]
   });
