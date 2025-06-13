@@ -17,7 +17,7 @@ app.post("/webhook", async (req, res) => {
 
     const handlerType = req.body?.handler;
 
-    // ✅ WELCOME HANDLER
+    // ✅ Welcome handler for trigger event
     if (handlerType === "trigger") {
       console.log("✨ Trigger event received – sending welcome message!");
       return res.json({
@@ -25,17 +25,16 @@ app.post("/webhook", async (req, res) => {
         replies: [
           {
             type: "text",
-            value: "👋 Welcome to Gaura Electric! Ask me anything about our scooters, batteries, or features—I'm here to help."
+            value: "👋 Welcome to Gaura Electric! I'm your AI assistant. Ask me anything about our scooters, batteries, or features!"
           }
         ]
       });
     }
 
-    // ✅ MESSAGE HANDLER
+    // ✅ Message handler for visitor chat
     const userMessage = req.body?.message?.text || "Hello";
     console.log("💬 Parsed user message:", userMessage);
 
-    // Step 1: Create thread
     const threadResponse = await axios.post(
       "https://api.openai.com/v1/threads",
       {},
@@ -47,9 +46,9 @@ app.post("/webhook", async (req, res) => {
         }
       }
     );
+
     const thread_id = threadResponse.data.id;
 
-    // Step 2: Post message
     await axios.post(
       `https://api.openai.com/v1/threads/${thread_id}/messages`,
       {
@@ -65,7 +64,6 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    // Step 3: Run assistant
     const runResponse = await axios.post(
       `https://api.openai.com/v1/threads/${thread_id}/runs`,
       {
@@ -80,11 +78,12 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    // Step 4: Poll until complete
+    // Poll until the assistant finishes
     let runStatus = "in_progress";
     let runCheck;
+
     while (runStatus === "in_progress" || runStatus === "queued") {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await new Promise(resolve => setTimeout(resolve, 1500));
       runCheck = await axios.get(
         `https://api.openai.com/v1/threads/${thread_id}/runs/${runResponse.data.id}`,
         {
@@ -98,7 +97,7 @@ app.post("/webhook", async (req, res) => {
       runStatus = runCheck.data.status;
     }
 
-    // Step 5: Retrieve assistant response
+    // Get assistant's final reply
     const messagesResponse = await axios.get(
       `https://api.openai.com/v1/threads/${thread_id}/messages`,
       {
@@ -111,13 +110,13 @@ app.post("/webhook", async (req, res) => {
     );
 
     const aiResponse = messagesResponse.data.data.find((msg) => msg.role === "assistant");
-    let replyText = aiResponse?.content?.[0]?.text?.value || "Sorry, I didn't get that.";
+    let replyText = aiResponse?.content?.[0]?.text?.value || "Sorry, I didn't catch that.";
 
-    // ✅ Sanitize the output for Zoho SalesIQ
+    // ✅ Sanitize reply for Zoho
     replyText = replyText
-      .replace(/\*\*/g, "")               // Remove markdown bold
-      .replace(/【.*?†source】/g, "")     // Remove source notations
-      .replace(/\n+/g, " ")              // Flatten line breaks
+      .replace(/\*\*/g, "")
+      .replace(/【.*?†source】/g, "")
+      .replace(/\n+/g, " ")
       .trim();
 
     console.log("🚀 Outgoing response to SalesIQ:", replyText);
@@ -131,14 +130,15 @@ app.post("/webhook", async (req, res) => {
         }
       ]
     });
+
   } catch (error) {
-    console.error("❌ Error:", error.message);
+    console.error("❌ Error occurred:", error.message);
     res.status(500).json({
       action: "reply",
       replies: [
         {
           type: "text",
-          value: "Sorry! Something went wrong while generating your answer. Please try again."
+          value: "⚠️ I'm facing some trouble fetching your answer. Please try again shortly."
         }
       ]
     });
