@@ -6,18 +6,17 @@ const port = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
-// Catch unexpected errors
 process.on("uncaughtException", (err) => {
   console.error("❌ UNCAUGHT EXCEPTION:", err.stack || err);
 });
 
-// Root health-check route
+// ✅ Root route for health check
 app.get("/", (req, res) => {
   console.log("🟢 GET / hit");
-  res.send("🧪 Test server running");
+  res.send("🚀 Webhook is live");
 });
 
-// Zobot webhook route
+// ✅ Webhook endpoint for Zoho SalesIQ
 app.post("/webhook", (req, res) => {
   console.log("📩 Webhook called!");
   console.log("🔍 Request body:", JSON.stringify(req.body, null, 2));
@@ -26,30 +25,35 @@ app.post("/webhook", (req, res) => {
 
   if (handlerType === "trigger") {
     console.log("✨ Trigger event received – sending welcome message!");
-    return res.json({
+    return res.status(200).json({
       action: "reply",
       replies: [
         {
           type: "text",
-          value: "👋 Welcome to Gaura Electric! I'm your AI assistant—ask me anything about scooters, batteries, or features."
+          value: "👋 Welcome to Gaura Electric! I'm your AI assistant. Ask me anything about our scooters, batteries, or services."
         }
+      ],
+      suggestions: [
+        { type: "text", value: "View scooters" },
+        { type: "text", value: "Battery warranty" },
+        { type: "text", value: "Book test ride" }
       ]
     });
   }
 
-  // Optional: respond to other handlers like 'message'
-  res.json({
+  // Optional: fallback for other handlers
+  console.log("⚠️ Unknown handler:", handlerType);
+  return res.status(200).json({
     action: "reply",
     replies: [
       {
         type: "text",
-        value: "⚠️ Received unsupported handler. I'm listening though!"
+        value: "I'm not sure how to respond to that yet, but I'm here to help!"
       }
     ]
   });
 });
 
-// Start server
 app.listen(port, () => {
   console.log(`✅ Server running on port ${port}`);
 });
