@@ -14,8 +14,11 @@ app.use(bodyParser.json());
 app.post("/webhook", async (req, res) => {
   try {
     console.log("Incoming request body:", req.body);
-const userMessage = req.body.question || "Hello";
 
+    // For SalesIQ Zobot webhook:
+    const userMessage = req.body?.visitor?.question || req.body?.question || "Hello";
+
+    // Step 1: Create thread
     const thread = await axios.post(
       "https://api.openai.com/v1/threads",
       {},
@@ -30,6 +33,7 @@ const userMessage = req.body.question || "Hello";
 
     const thread_id = thread.data.id;
 
+    // Step 2: Post user message
     await axios.post(
       `https://api.openai.com/v1/threads/${thread_id}/messages`,
       {
@@ -45,6 +49,7 @@ const userMessage = req.body.question || "Hello";
       }
     );
 
+    // Step 3: Run assistant
     const run = await axios.post(
       `https://api.openai.com/v1/threads/${thread_id}/runs`,
       {
@@ -59,6 +64,7 @@ const userMessage = req.body.question || "Hello";
       }
     );
 
+    // Step 4: Wait for run to complete
     let run_status = "in_progress";
     let run_result;
 
@@ -77,6 +83,7 @@ const userMessage = req.body.question || "Hello";
       run_status = run_result.data.status;
     }
 
+    // Step 5: Fetch response message
     const messages = await axios.get(
       `https://api.openai.com/v1/threads/${thread_id}/messages`,
       {
@@ -89,18 +96,31 @@ const userMessage = req.body.question || "Hello";
     );
 
     const responseMessage = messages.data.data.find(msg => msg.role === "assistant");
+
+    const replyText = responseMessage?.content[0]?.text?.value || "No reply received.";
+
+    // ✅ Final response formatted for Zoho SalesIQ
     res.json({
-  replies: [
-    {
-      type: "text",
-      value: responseMessage?.content[0]?.text?.value || "No reply received."
-    }
-  ]
-});
+      action: "reply",
+      replies: [
+        {
+          type: "text",
+          value: replyText
+        }
+      ]
+    });
 
   } catch (error) {
     console.error("Error:", error.message);
-    res.status(500).json({ error: "Failed to process request." });
+    res.status(500).json({
+      action: "reply",
+      replies: [
+        {
+          type: "text",
+          value: "Oops! Something went wrong while processing your request."
+        }
+      ]
+    });
   }
 });
 
