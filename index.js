@@ -13,28 +13,27 @@ app.use(bodyParser.json());
 
 app.post("/webhook", async (req, res) => {
   try {
-    console.log("Incoming request body:", req.body);
+    console.log("Incoming request body:", JSON.stringify(req.body, null, 2));
 
-    // For SalesIQ Zobot webhook:
+    // ✅ Extract message from Zoho SalesIQ payload
     const userMessage = req.body?.message?.text || "Hello";
+    console.log("Parsed user message:", userMessage);
 
-
-    // Step 1: Create thread
-    const thread = await axios.post(
+    // ✅ Step 1: Create thread
+    const threadResponse = await axios.post(
       "https://api.openai.com/v1/threads",
       {},
       {
         headers: {
-          "Authorization": `Bearer ${OPENAI_API_KEY}`,
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
           "OpenAI-Beta": "assistants=v2",
           "Content-Type": "application/json"
         }
       }
     );
+    const thread_id = threadResponse.data.id;
 
-    const thread_id = thread.data.id;
-
-    // Step 2: Post user message
+    // ✅ Step 2: Post user's message
     await axios.post(
       `https://api.openai.com/v1/threads/${thread_id}/messages`,
       {
@@ -43,64 +42,64 @@ app.post("/webhook", async (req, res) => {
       },
       {
         headers: {
-          "Authorization": `Bearer ${OPENAI_API_KEY}`,
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
           "OpenAI-Beta": "assistants=v2",
           "Content-Type": "application/json"
         }
       }
     );
 
-    // Step 3: Run assistant
-    const run = await axios.post(
+    // ✅ Step 3: Run assistant
+    const runResponse = await axios.post(
       `https://api.openai.com/v1/threads/${thread_id}/runs`,
       {
         assistant_id: ASSISTANT_ID
       },
       {
         headers: {
-          "Authorization": `Bearer ${OPENAI_API_KEY}`,
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
           "OpenAI-Beta": "assistants=v2",
           "Content-Type": "application/json"
         }
       }
     );
 
-    // Step 4: Wait for run to complete
-    let run_status = "in_progress";
-    let run_result;
+    // ✅ Step 4: Poll until completion
+    let runStatus = "in_progress";
+    let runCheck;
 
-    while (run_status === "in_progress" || run_status === "queued") {
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      run_result = await axios.get(
-        `https://api.openai.com/v1/threads/${thread_id}/runs/${run.data.id}`,
+    while (runStatus === "in_progress" || runStatus === "queued") {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      runCheck = await axios.get(
+        `https://api.openai.com/v1/threads/${thread_id}/runs/${runResponse.data.id}`,
         {
           headers: {
-            "Authorization": `Bearer ${OPENAI_API_KEY}`,
+            Authorization: `Bearer ${OPENAI_API_KEY}`,
             "OpenAI-Beta": "assistants=v2",
             "Content-Type": "application/json"
           }
         }
       );
-      run_status = run_result.data.status;
+      runStatus = runCheck.data.status;
     }
 
-    // Step 5: Fetch response message
-    const messages = await axios.get(
+    // ✅ Step 5: Fetch assistant response
+    const messagesResponse = await axios.get(
       `https://api.openai.com/v1/threads/${thread_id}/messages`,
       {
         headers: {
-          "Authorization": `Bearer ${OPENAI_API_KEY}`,
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
           "OpenAI-Beta": "assistants=v2",
           "Content-Type": "application/json"
         }
       }
     );
 
-    const responseMessage = messages.data.data.find(msg => msg.role === "assistant");
+    const aiResponse = messagesResponse.data.data.find((msg) => msg.role === "assistant");
+    const replyText = aiResponse?.content?.[0]?.text?.value || "No reply received.";
+    console.log("AI replyText:", replyText);
 
-    const replyText = responseMessage?.content[0]?.text?.value || "No reply received.";
-
-    // ✅ Final response formatted for Zoho SalesIQ
+    // ✅ Format response for Zoho Zobot webhook
     res.json({
       action: "reply",
       replies: [
@@ -110,7 +109,6 @@ app.post("/webhook", async (req, res) => {
         }
       ]
     });
-
   } catch (error) {
     console.error("Error:", error.message);
     res.status(500).json({
@@ -118,7 +116,7 @@ app.post("/webhook", async (req, res) => {
       replies: [
         {
           type: "text",
-          value: "Oops! Something went wrong while processing your request."
+          value: "Oops! Something went wrong while processing your message."
         }
       ]
     });
@@ -126,5 +124,5 @@ app.post("/webhook", async (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
+  console.log(`🚀 Server is live on port ${port}`);
 });
