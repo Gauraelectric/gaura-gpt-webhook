@@ -89,7 +89,15 @@ const userMessage = req.body.question || "Hello";
     );
 
     const responseMessage = messages.data.data.find(msg => msg.role === "assistant");
-    res.json({ answer: responseMessage?.content[0]?.text?.value || "No reply received." });
+    res.json({
+  replies: [
+    {
+      type: "text",
+      value: responseMessage?.content[0]?.text?.value || "No reply received."
+    }
+  ]
+});
+
   } catch (error) {
     console.error("Error:", error.message);
     res.status(500).json({ error: "Failed to process request." });
