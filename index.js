@@ -6,38 +6,45 @@ const port = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
-// Health-check route for quick testing
-app.get("/", (req, res) => {
-  console.log("🟢 GET / hit");
-  res.send("Server is running.");
+// Catch and log any uncaught exceptions.
+process.on("uncaughtException", (err) => {
+  console.error("❌ UNCAUGHT EXCEPTION:", err.stack || err);
 });
 
-// Main webhook endpoint for Zoho SalesIQ
+// Health-check route.
+app.get("/", (req, res) => {
+  console.log("🟢 GET / hit");
+  res.send("Minimal server running");
+});
+
+// Main webhook endpoint for Zoho SalesIQ.
 app.post("/webhook", (req, res) => {
   console.log("📩 Webhook called!");
   console.log("🔍 Request body:", JSON.stringify(req.body, null, 2));
 
-  const handler = req.body.handler;
+  const handler = req.body.handler; // Expecting "trigger" or "message"
 
+  // Handle the "trigger" event (welcome message).
   if (handler === "trigger") {
-    // For welcome events—SalesIQ is expecting a simple welcome message.
     console.log("✨ Trigger event received – sending welcome message!");
     return res.status(200).json({
       action: "reply",
       replies: [
         {
           type: "text",
-          value: "Welcome to Gaura Electric! I'm your digital assistant. How can I help you today?"
+          value:
+            "Welcome to Gaura Electric! I'm your digital assistant. How can I help you today?"
         }
       ]
     });
-  } else if (handler === "message") {
-    // For messages (visitor-initiated)
+  }
+  // Handle the "message" event (visitor has sent a question).
+  else if (handler === "message") {
     const question = req.body.question;
     console.log("💬 Message event received – question:", question);
 
     if (question && question.trim() !== "") {
-      // Process the question as needed. For now, echoing it.
+      // Example: Echo the visitor's question back.
       return res.status(200).json({
         action: "reply",
         replies: [
@@ -48,18 +55,21 @@ app.post("/webhook", (req, res) => {
         ]
       });
     } else {
-      // Fallback when no valid question is received.
+      // Fallback when the question is missing or blank.
       return res.status(200).json({
         action: "reply",
         replies: [
           {
             type: "text",
-            value: "I did not receive any question. Could you please type your query again?"
+            value:
+              "I did not receive a valid question. Please type your query again."
           }
         ]
       });
     }
-  } else {
+  }
+  // Handle an unknown or missing handler type.
+  else {
     console.log("⚠️ Unknown handler:", handler);
     return res.status(200).json({
       action: "reply",
