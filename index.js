@@ -16,7 +16,8 @@ app.post("/webhook", async (req, res) => {
     console.log("Incoming request body:", req.body);
 
     // For SalesIQ Zobot webhook:
-    const userMessage = req.body?.visitor?.question || req.body?.question || "Hello";
+    const userMessage = req.body?.message?.text || "Hello";
+
 
     // Step 1: Create thread
     const thread = await axios.post(
