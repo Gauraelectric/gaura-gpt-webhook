@@ -100,6 +100,11 @@ app.post("/webhook", async (req, res) => {
     console.log("AI replyText:", replyText);
 
     // ✅ Format response for Zoho Zobot webhook
+    console.log("🚀 Outgoing response to SalesIQ:", {
+  action: "reply",
+  replies: [{ type: "text", value: replyText }]
+});
+
     res.json({
       action: "reply",
       replies: [
