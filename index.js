@@ -1,90 +1,94 @@
+const express = require("express");
+const bodyParser = require("body-parser");
+const axios = require("axios");
+require("dotenv").config();
 
-require('dotenv').config();
-const express = require('express');
-const axios = require('axios');
-const bodyParser = require('body-parser');
 const app = express();
+const port = process.env.PORT || 3000;
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const ASSISTANT_ID = process.env.ASSISTANT_ID;
 
 app.use(bodyParser.json());
 
-app.post('/webhook', async (req, res) => {
-    const userMessage = req.body.text;
+app.post("/webhook", async (req, res) => {
+  try {
+    const userMessage = req.body.message || req.body.text || "Hi";
+    const threadRes = await axios.post(
+      "https://api.openai.com/v1/threads",
+      {},
+      {
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "OpenAI-Beta": "assistants=v2",
+          "Content-Type": "application/json",
+        },
+      }
+    );
 
-    try {
-        // Step 1: Create a thread
-        const threadRes = await axios.post('https://api.openai.com/v1/threads', {}, {
-            headers: {
-                'Authorization': `Bearer ${OPENAI_API_KEY}`,
-                'OpenAI-Beta': 'assistants=v2',
-                'Content-Type': 'application/json'
-            }
-        });
+    const threadId = threadRes.data.id;
 
-        const threadId = threadRes.data.id;
+    await axios.post(
+      `https://api.openai.com/v1/threads/${threadId}/messages`,
+      { role: "user", content: userMessage },
+      {
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "OpenAI-Beta": "assistants=v2",
+          "Content-Type": "application/json",
+        },
+      }
+    );
 
-        // Step 2: Add the user message
-        await axios.post(`https://api.openai.com/v1/threads/${threadId}/messages`, {
-            role: 'user',
-            content: userMessage
-        }, {
-            headers: {
-                'Authorization': `Bearer ${OPENAI_API_KEY}`,
-                'OpenAI-Beta': 'assistants=v2',
-                'Content-Type': 'application/json'
-            }
-        });
+    const run = await axios.post(
+      `https://api.openai.com/v1/threads/${threadId}/runs`,
+      { assistant_id: ASSISTANT_ID },
+      {
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "OpenAI-Beta": "assistants=v2",
+          "Content-Type": "application/json",
+        },
+      }
+    );
 
-        // Step 3: Run the assistant
-        const runRes = await axios.post(`https://api.openai.com/v1/threads/${threadId}/runs`, {
-            assistant_id: ASSISTANT_ID
-        }, {
-            headers: {
-                'Authorization': `Bearer ${OPENAI_API_KEY}`,
-                'OpenAI-Beta': 'assistants=v2',
-                'Content-Type': 'application/json'
-            }
-        });
-
-        const runId = runRes.data.id;
-
-        // Step 4: Poll for run completion
-        let runStatus;
-        do {
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            const checkRes = await axios.get(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}`, {
-                headers: {
-                    'Authorization': `Bearer ${OPENAI_API_KEY}`,
-                    'OpenAI-Beta': 'assistants=v2',
-                    'Content-Type': 'application/json'
-                }
-            });
-            runStatus = checkRes.data.status;
-        } while (runStatus !== 'completed');
-
-        // Step 5: Get the assistant's response
-        const messagesRes = await axios.get(`https://api.openai.com/v1/threads/${threadId}/messages`, {
-            headers: {
-                'Authorization': `Bearer ${OPENAI_API_KEY}`,
-                'OpenAI-Beta': 'assistants=v2',
-                'Content-Type': 'application/json'
-            }
-        });
-
-        const messages = messagesRes.data.data;
-        const reply = messages.reverse().find(msg => msg.role === 'assistant');
-
-        res.json({ reply: reply ? reply.content[0].text.value : "No reply from assistant." });
-
-    } catch (error) {
-        console.error(error.response ? error.response.data : error.message);
-        res.status(500).send('Error handling the webhook request.');
+    let status = "in_progress";
+    let runResult;
+    while (status === "in_progress") {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      runResult = await axios.get(
+        `https://api.openai.com/v1/threads/${threadId}/runs/${run.data.id}`,
+        {
+          headers: {
+            Authorization: `Bearer ${OPENAI_API_KEY}`,
+            "OpenAI-Beta": "assistants=v2",
+          },
+        }
+      );
+      status = runResult.data.status;
     }
+
+    const messages = await axios.get(
+      `https://api.openai.com/v1/threads/${threadId}/messages`,
+      {
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "OpenAI-Beta": "assistants=v2",
+        },
+      }
+    );
+
+    const reply = messages.data.data.find((msg) => msg.role === "assistant");
+    const responseText =
+      reply?.content?.[0]?.text?.value || "Sorry, no response found.";
+
+    res.json({ reply: responseText });
+  } catch (error) {
+    console.error("Error processing request:", error.message);
+    res.status(500).json({ error: "Failed to process request." });
+  }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+app.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
 });
