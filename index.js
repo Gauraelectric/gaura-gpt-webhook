@@ -13,13 +13,29 @@ app.use(bodyParser.json());
 
 app.post("/webhook", async (req, res) => {
   try {
-    console.log("Incoming request body:", JSON.stringify(req.body, null, 2));
+    console.log("📩 Incoming request body:", JSON.stringify(req.body, null, 2));
 
-    // ✅ Extract message from Zoho SalesIQ payload
+    const handlerType = req.body?.handler;
+
+    // ✅ Handle initial welcome trigger
+    if (handlerType === "trigger") {
+      console.log("✨ Trigger event received – sending welcome message!");
+      return res.json({
+        action: "reply",
+        replies: [
+          {
+            type: "text",
+            value: "Hi there! I'm your AI assistant. Ask me anything about Gaura Electric scooters or battery tech!"
+          }
+        ]
+      });
+    }
+
+    // ✅ Handle user message
     const userMessage = req.body?.message?.text || "Hello";
-    console.log("Parsed user message:", userMessage);
+    console.log("💬 Parsed user message:", userMessage);
 
-    // ✅ Step 1: Create thread
+    // Create a thread
     const threadResponse = await axios.post(
       "https://api.openai.com/v1/threads",
       {},
@@ -33,7 +49,7 @@ app.post("/webhook", async (req, res) => {
     );
     const thread_id = threadResponse.data.id;
 
-    // ✅ Step 2: Post user's message
+    // Post the user message to thread
     await axios.post(
       `https://api.openai.com/v1/threads/${thread_id}/messages`,
       {
@@ -49,7 +65,7 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    // ✅ Step 3: Run assistant
+    // Run assistant
     const runResponse = await axios.post(
       `https://api.openai.com/v1/threads/${thread_id}/runs`,
       {
@@ -64,7 +80,6 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    // ✅ Step 4: Poll until completion
     let runStatus = "in_progress";
     let runCheck;
 
@@ -83,7 +98,7 @@ app.post("/webhook", async (req, res) => {
       runStatus = runCheck.data.status;
     }
 
-    // ✅ Step 5: Fetch assistant response
+    // Get assistant response
     const messagesResponse = await axios.get(
       `https://api.openai.com/v1/threads/${thread_id}/messages`,
       {
@@ -96,15 +111,18 @@ app.post("/webhook", async (req, res) => {
     );
 
     const aiResponse = messagesResponse.data.data.find((msg) => msg.role === "assistant");
-    const replyText = aiResponse?.content?.[0]?.text?.value || "No reply received.";
-    console.log("AI replyText:", replyText);
+    let replyText = aiResponse?.content?.[0]?.text?.value || "No reply received.";
 
-    // ✅ Format response for Zoho Zobot webhook
-    console.log("🚀 Outgoing response to SalesIQ:", {
-  action: "reply",
-  replies: [{ type: "text", value: replyText }]
-});
+    // 🔧 Sanitize reply (remove markdown/newlines/citations)
+    replyText = replyText
+      .replace(/\*\*/g, "")                     // remove bold markers
+      .replace(/【.*?†source】/g, "")           // remove source markers
+      .replace(/\n/g, " ")                     // flatten line breaks
+      .trim();
 
+    console.log("🚀 Outgoing response to SalesIQ:", replyText);
+
+    // Return clean reply
     res.json({
       action: "reply",
       replies: [
@@ -115,13 +133,13 @@ app.post("/webhook", async (req, res) => {
       ]
     });
   } catch (error) {
-    console.error("Error:", error.message);
+    console.error("❌ Error:", error.message);
     res.status(500).json({
       action: "reply",
       replies: [
         {
           type: "text",
-          value: "Oops! Something went wrong while processing your message."
+          value: "Oops! I ran into an issue fetching your answer. Please try again."
         }
       ]
     });
@@ -129,5 +147,5 @@ app.post("/webhook", async (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`🚀 Server is live on port ${port}`);
+  console.log(`✅ Server running on port ${port}`);
 });
