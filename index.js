@@ -19,7 +19,7 @@ app.post("/webhook", async (req, res) => {
     const userMessage = req.body?.message?.text || "Hello";
     console.log("💬 Parsed user message:", userMessage);
 
-    // ✅ Step 1: Create a thread for this conversation
+    // ✅ Step 1: Create a thread
     const threadResponse = await axios.post(
       "https://api.openai.com/v1/threads",
       {},
@@ -33,7 +33,7 @@ app.post("/webhook", async (req, res) => {
     );
     const thread_id = threadResponse.data.id;
 
-    // ✅ Step 2: Post user's message to OpenAI
+    // ✅ Step 2: Add user message
     await axios.post(
       `https://api.openai.com/v1/threads/${thread_id}/messages`,
       {
@@ -49,7 +49,7 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    // ✅ Step 3: Run assistant to generate response
+    // ✅ Step 3: Run assistant
     const runResponse = await axios.post(
       `https://api.openai.com/v1/threads/${thread_id}/runs`,
       {
@@ -64,12 +64,11 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    // ✅ Step 4: Poll OpenAI until response is ready
+    // ✅ Step 4: Poll until status is 'completed'
     let runStatus = "in_progress";
     let runCheck;
-    
     while (runStatus === "in_progress" || runStatus === "queued") {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await new Promise(resolve => setTimeout(resolve, 1500));
       runCheck = await axios.get(
         `https://api.openai.com/v1/threads/${thread_id}/runs/${runResponse.data.id}`,
         {
@@ -83,7 +82,7 @@ app.post("/webhook", async (req, res) => {
       runStatus = runCheck.data.status;
     }
 
-    // ✅ Step 5: Fetch AI response from OpenAI
+    // ✅ Step 5: Get AI reply
     const messagesResponse = await axios.get(
       `https://api.openai.com/v1/threads/${thread_id}/messages`,
       {
@@ -95,20 +94,29 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    const aiResponse = messagesResponse.data.data.find((msg) => msg.role === "assistant");
-    const replyText = aiResponse?.content?.[0]?.text?.value || "No reply received.";
+    const aiResponse = messagesResponse.data.data.find(msg => msg.role === "assistant");
+    const replyText = aiResponse?.content?.[0]?.text?.value || "Sorry, I couldn't find an answer.";
+
     console.log("🤖 AI replyText:", replyText);
 
-    // ✅ Format response for Zoho SalesIQ
+    // ✅ Respond in correct Zoho SalesIQ format
     res.json({
-      statusCode: 200, // ✅ Explicit status code for SalesIQ compatibility
-      message: replyText // ✅ Some bots prefer "message" over "replies"
+      replies: [
+        {
+          type: "text",
+          text: replyText
+        }
+      ]
     });
   } catch (error) {
     console.error("❌ Error:", error.message);
     res.status(500).json({
-      statusCode: 500, // Explicit error handling
-      message: "Oops! Something went wrong while processing your message."
+      replies: [
+        {
+          type: "text",
+          text: "Oops! Something went wrong while processing your message."
+        }
+      ]
     });
   }
 });
