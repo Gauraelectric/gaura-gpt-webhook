@@ -7,8 +7,8 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini"; // Flexible model config
-const ASSISTANT_ID = process.env.ASSISTANT_ID; // For reference/tracking/logging
+const ASSISTANT_ID = process.env.ASSISTANT_ID;
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
 app.use(bodyParser.json());
 
@@ -17,36 +17,93 @@ app.post("/webhook", async (req, res) => {
     console.log("📩 Incoming request body:", JSON.stringify(req.body, null, 2));
 
     const userMessage = req.body?.message?.text || "Hello";
-    console.log("💬 User message:", userMessage);
+    console.log("💬 Parsed user message:", userMessage);
+    console.log("🤖 Using model:", OPENAI_MODEL);
 
-    const completion = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
+    // Step 1: Create a thread
+    const threadRes = await axios.post(
+      "https://api.openai.com/v1/threads",
+      {},
       {
-        model: OPENAI_MODEL,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are a helpful customer support assistant for Gaura Electric Vehicles. Only respond based on company policy, products (G5, G6, Warrior, Sniper, Partner), warranty, and service. If you're not sure, say: 'Please check with the dealership.'"
-          },
-          {
-            role: "user",
-            content: userMessage
-          }
-        ],
-        temperature: 0.7
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "OpenAI-Beta": "assistants=v2",
+          "Content-Type": "application/json"
+        }
+      }
+    );
+    const thread_id = threadRes.data.id;
+
+    // Step 2: Add user message
+    await axios.post(
+      `https://api.openai.com/v1/threads/${thread_id}/messages`,
+      {
+        role: "user",
+        content: userMessage
       },
       {
         headers: {
           Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "OpenAI-Beta": "assistants=v2",
           "Content-Type": "application/json"
         }
       }
     );
 
-    const replyText = completion.data.choices?.[0]?.message?.content?.trim() || "Sorry, I don’t have that information.";
+    // Step 3: Run assistant
+    const runRes = await axios.post(
+      `https://api.openai.com/v1/threads/${thread_id}/runs`,
+      {
+        assistant_id: ASSISTANT_ID
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "OpenAI-Beta": "assistants=v2",
+          "Content-Type": "application/json"
+        }
+      }
+    );
 
-    console.log("🤖 AI Response:", replyText);
+    // Step 4: Poll run status
+    let runStatus = "in_progress";
+    let attempts = 0;
+    let runCheck;
+    while ((runStatus === "in_progress" || runStatus === "queued") && attempts < 5) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      runCheck = await axios.get(
+        `https://api.openai.com/v1/threads/${thread_id}/runs/${runRes.data.id}`,
+        {
+          headers: {
+            Authorization: `Bearer ${OPENAI_API_KEY}`,
+            "OpenAI-Beta": "assistants=v2",
+            "Content-Type": "application/json"
+          }
+        }
+      );
+      runStatus = runCheck.data.status;
+      attempts++;
+    }
+
+    let replyText = "Sorry, still processing... please try again.";
+
+    if (runStatus === "completed") {
+      const msgRes = await axios.get(
+        `https://api.openai.com/v1/threads/${thread_id}/messages`,
+        {
+          headers: {
+            Authorization: `Bearer ${OPENAI_API_KEY}`,
+            "OpenAI-Beta": "assistants=v2",
+            "Content-Type": "application/json"
+          }
+        }
+      );
+
+      const aiMessage = msgRes.data.data.find(msg => msg.role === "assistant");
+      replyText = aiMessage?.content?.[0]?.text?.value || replyText;
+    }
+
+    console.log("🤖 Final Reply:", replyText);
 
     res.json({
       replies: [
@@ -55,18 +112,21 @@ app.post("/webhook", async (req, res) => {
           text: replyText
         }
       ],
-      agent_id: ASSISTANT_ID || "gpt-agent" // Optional agent ID for tracking
+      agent_id: ASSISTANT_ID,
+      model_used: OPENAI_MODEL
     });
+
   } catch (err) {
     console.error("❌ Error:", err.message);
     res.status(500).json({
       replies: [
         {
           type: "text",
-          text: "Sorry, something went wrong while processing your request."
+          text: "Sorry, something went wrong while processing your message."
         }
       ],
-      agent_id: ASSISTANT_ID || "gpt-agent"
+      agent_id: ASSISTANT_ID,
+      model_used: OPENAI_MODEL
     });
   }
 });
