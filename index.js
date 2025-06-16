@@ -8,7 +8,6 @@ const port = process.env.PORT || 3000;
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const ASSISTANT_ID = process.env.ASSISTANT_ID;
-const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini"; // Optional: for logging only
 
 app.use(bodyParser.json());
 
@@ -18,7 +17,7 @@ app.post("/webhook", async (req, res) => {
 
     const userMessage = req.body?.message?.text || "Hello";
 
-    // Step 1: Create a thread (memory enabled)
+    // Step 1: Create thread (memory support)
     const threadRes = await axios.post(
       "https://api.openai.com/v1/threads",
       {},
@@ -32,7 +31,7 @@ app.post("/webhook", async (req, res) => {
     );
     const thread_id = threadRes.data.id;
 
-    // Step 2: Add message to thread
+    // Step 2: Add user message to thread
     await axios.post(
       `https://api.openai.com/v1/threads/${thread_id}/messages`,
       {
@@ -48,7 +47,7 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    // Step 3: Trigger assistant run
+    // Step 3: Run assistant
     const runRes = await axios.post(
       `https://api.openai.com/v1/threads/${thread_id}/runs`,
       {
@@ -63,16 +62,14 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    const run_id = runRes.data.id;
+    // Step 4: Poll for completion (up to 10 times, 5s max)
     let runStatus = "in_progress";
     let attempts = 0;
     let runCheck;
-
-    // Step 4: Poll assistant run status (up to 10 attempts / 5s total)
     while ((runStatus === "in_progress" || runStatus === "queued") && attempts < 10) {
       await new Promise(resolve => setTimeout(resolve, 500));
       runCheck = await axios.get(
-        `https://api.openai.com/v1/threads/${thread_id}/runs/${run_id}`,
+        `https://api.openai.com/v1/threads/${thread_id}/runs/${runRes.data.id}`,
         {
           headers: {
             Authorization: `Bearer ${OPENAI_API_KEY}`,
@@ -84,9 +81,9 @@ app.post("/webhook", async (req, res) => {
       attempts++;
     }
 
-    let replyText = "Sorry, the assistant is still thinking. Please ask again.";
+    let replyText = "Sorry, still thinking. Please try again.";
 
-    // Step 5: If run completed, fetch response
+    // Step 5: If completed, fetch message
     if (runStatus === "completed") {
       const msgRes = await axios.get(
         `https://api.openai.com/v1/threads/${thread_id}/messages`,
@@ -98,13 +95,13 @@ app.post("/webhook", async (req, res) => {
         }
       );
 
-      const aiMsg = msgRes.data.data.find(msg => msg.role === "assistant");
-      replyText = aiMsg?.content?.[0]?.text?.value || replyText;
+      const aiMessage = msgRes.data.data.find(msg => msg.role === "assistant");
+      replyText = aiMessage?.content?.[0]?.text?.value || replyText;
     }
 
-    console.log("🤖 AI reply:", replyText);
+    console.log("🤖 Assistant reply:", replyText);
 
-    // Step 6: Respond to Zoho SalesIQ
+    // Step 6: Send response to Zoho SalesIQ
     res.json({
       replies: [
         {
@@ -112,20 +109,19 @@ app.post("/webhook", async (req, res) => {
           text: replyText
         }
       ],
-      agent_id: ASSISTANT_ID,
-      model_used: OPENAI_MODEL
+      agent_id: ASSISTANT_ID
     });
+
   } catch (err) {
     console.error("❌ Error:", err.message);
     res.status(500).json({
       replies: [
         {
           type: "text",
-          text: "Sorry, something went wrong while processing your message."
+          text: "Sorry, something went wrong while processing your request."
         }
       ],
-      agent_id: ASSISTANT_ID,
-      model_used: OPENAI_MODEL
+      agent_id: ASSISTANT_ID
     });
   }
 });
