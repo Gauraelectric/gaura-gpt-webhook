@@ -69,7 +69,7 @@ app.post("/webhook", async (req, res) => {
     let runStatus = "in_progress";
     let attempts = 0;
     let runCheck;
-    while ((runStatus === "in_progress" || runStatus === "queued") && attempts < 5) {
+    while ((runStatus === "in_progress" || runStatus === "queued") && attempts < 10) {
       await new Promise(resolve => setTimeout(resolve, 500));
       runCheck = await axios.get(
         `https://api.openai.com/v1/threads/${thread_id}/runs/${runRes.data.id}`,
