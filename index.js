@@ -7,99 +7,41 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const ASSISTANT_ID = process.env.ASSISTANT_ID;
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-3.5-turbo";
 
 app.use(bodyParser.json());
 
 app.post("/webhook", async (req, res) => {
   try {
-    console.log("📩 Incoming request body:", JSON.stringify(req.body, null, 2));
-
-    // ✅ Extract user message from SalesIQ payload
     const userMessage = req.body?.message?.text || "Hello";
-    console.log("💬 Parsed user message:", userMessage);
 
-    // ✅ Step 1: Create a thread
-    const threadResponse = await axios.post(
-      "https://api.openai.com/v1/threads",
-      {},
+    const response = await axios.post(
+      "https://api.openai.com/v1/chat/completions",
       {
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "OpenAI-Beta": "assistants=v2",
-          "Content-Type": "application/json"
-        }
-      }
-    );
-    const thread_id = threadResponse.data.id;
-
-    // ✅ Step 2: Add user message
-    await axios.post(
-      `https://api.openai.com/v1/threads/${thread_id}/messages`,
-      {
-        role: "user",
-        content: userMessage
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "OpenAI-Beta": "assistants=v2",
-          "Content-Type": "application/json"
-        }
-      }
-    );
-
-    // ✅ Step 3: Run assistant
-    const runResponse = await axios.post(
-      `https://api.openai.com/v1/threads/${thread_id}/runs`,
-      {
-        assistant_id: ASSISTANT_ID
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "OpenAI-Beta": "assistants=v2",
-          "Content-Type": "application/json"
-        }
-      }
-    );
-
-    // ✅ Step 4: Poll until status is 'completed'
-    let runStatus = "in_progress";
-    let runCheck;
-    while (runStatus === "in_progress" || runStatus === "queued") {
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      runCheck = await axios.get(
-        `https://api.openai.com/v1/threads/${thread_id}/runs/${runResponse.data.id}`,
-        {
-          headers: {
-            Authorization: `Bearer ${OPENAI_API_KEY}`,
-            "OpenAI-Beta": "assistants=v2",
-            "Content-Type": "application/json"
+        model: OPENAI_MODEL,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a support assistant for Gaura Electric Vehicles. Answer questions based only on official products and policies. If unsure, say 'Please check with the dealership.'"
+          },
+          {
+            role: "user",
+            content: userMessage
           }
-        }
-      );
-      runStatus = runCheck.data.status;
-    }
-
-    // ✅ Step 5: Get AI reply
-    const messagesResponse = await axios.get(
-      `https://api.openai.com/v1/threads/${thread_id}/messages`,
+        ],
+        temperature: 0.7
+      },
       {
         headers: {
           Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "OpenAI-Beta": "assistants=v2",
           "Content-Type": "application/json"
         }
       }
     );
 
-    const aiResponse = messagesResponse.data.data.find(msg => msg.role === "assistant");
-    const replyText = aiResponse?.content?.[0]?.text?.value || "Sorry, I couldn't find an answer.";
+    const replyText = response.data.choices[0].message.content;
 
-    console.log("🤖 AI replyText:", replyText);
-
-    // ✅ Respond in correct Zoho SalesIQ format
     res.json({
       replies: [
         {
@@ -114,7 +56,7 @@ app.post("/webhook", async (req, res) => {
       replies: [
         {
           type: "text",
-          text: "Oops! Something went wrong while processing your message."
+          text: "Sorry, something went wrong. Please try again later."
         }
       ]
     });
@@ -122,5 +64,5 @@ app.post("/webhook", async (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`🚀 Server is live on port ${port}`);
+  console.log(`🚀 Server is running on port ${port}`);
 });
