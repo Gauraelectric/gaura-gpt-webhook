@@ -1,27 +1,27 @@
+require("dotenv").config();
 const express = require("express");
 const bodyParser = require("body-parser");
 const axios = require("axios");
-require("dotenv").config();
 
 const app = express();
 const port = process.env.PORT || 3000;
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const ASSISTANT_ID = process.env.ASSISTANT_ID;
-const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini"; // Optional tracking/logging only
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
 app.use(bodyParser.json());
+
+app.get("/", (req, res) => {
+  res.send("✅ Gaura GPT Webhook is live!");
+});
 
 app.post("/webhook", async (req, res) => {
   try {
     console.log("📩 Incoming request:", JSON.stringify(req.body, null, 2));
     const userMessage = req.body?.message?.text || req.body?.question || "Hello";
 
-    console.log("💬 User input:", userMessage);
-    console.log("🎯 Assistant ID:", ASSISTANT_ID);
-    console.log("🤖 Model:", OPENAI_MODEL);
-
-    // Step 1: Create thread
+    // 1. Create thread
     const threadRes = await axios.post(
       "https://api.openai.com/v1/threads",
       {},
@@ -35,97 +35,56 @@ app.post("/webhook", async (req, res) => {
     );
     const thread_id = threadRes.data.id;
 
-    // Step 2: Add user message to thread
+    // 2. Post user message
     await axios.post(
       `https://api.openai.com/v1/threads/${thread_id}/messages`,
-      {
-        role: "user",
-        content: userMessage
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "OpenAI-Beta": "assistants=v2",
-          "Content-Type": "application/json"
-        }
-      }
+      { role: "user", content: userMessage },
+      { headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "OpenAI-Beta": "assistants=v2", "Content-Type": "application/json" } }
     );
 
-    // Step 3: Run assistant
+    // 3. Run assistant
     const runRes = await axios.post(
       `https://api.openai.com/v1/threads/${thread_id}/runs`,
-      {
-        assistant_id: ASSISTANT_ID
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "OpenAI-Beta": "assistants=v2",
-          "Content-Type": "application/json"
-        }
-      }
+      { assistant_id: ASSISTANT_ID },
+      { headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "OpenAI-Beta": "assistants=v2", "Content-Type": "application/json" } }
     );
+    const runId = runRes.data.id;
 
-    // Step 4: Poll status up to 10 attempts (5s)
-    let runStatus = "in_progress";
-    let attempts = 0;
+    // 4. Poll until completed (or timeout after ~5 seconds)
+    let status = "in_progress";
     let runCheck;
-    while ((runStatus === "in_progress" || runStatus === "queued") && attempts < 10) {
-      await new Promise(resolve => setTimeout(resolve, 500));
+    for (let i = 0; i < 10 && (status === "in_progress" || status === "queued"); i++) {
+      await new Promise(r => setTimeout(r, 500));
       runCheck = await axios.get(
-        `https://api.openai.com/v1/threads/${thread_id}/runs/${runRes.data.id}`,
-        {
-          headers: {
-            Authorization: `Bearer ${OPENAI_API_KEY}`,
-            "OpenAI-Beta": "assistants=v2"
-          }
-        }
+        `https://api.openai.com/v1/threads/${thread_id}/runs/${runId}`,
+        { headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "OpenAI-Beta": "assistants=v2" } }
       );
-      runStatus = runCheck.data.status;
-      attempts++;
+      status = runCheck.data.status;
     }
 
     let replyText = "Sorry, still processing... please try again.";
 
-    // Step 5: If completed, fetch response
-    if (runStatus === "completed") {
+    if (status === "completed") {
       const msgRes = await axios.get(
         `https://api.openai.com/v1/threads/${thread_id}/messages`,
-        {
-          headers: {
-            Authorization: `Bearer ${OPENAI_API_KEY}`,
-            "OpenAI-Beta": "assistants=v2"
-          }
-        }
+        { headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "OpenAI-Beta": "assistants=v2" } }
       );
-
-      const aiMessage = msgRes.data.data.find(msg => msg.role === "assistant");
-      replyText = aiMessage?.content?.[0]?.text?.value || replyText;
+      const aiMsg = msgRes.data.data.find(m => m.role === "assistant");
+      replyText = aiMsg?.content?.[0]?.text?.value || replyText;
     }
 
     console.log("✅ Final reply:", replyText);
 
-    // Step 6: Send formatted response to SalesIQ
     res.json({
-      replies: [
-        {
-          type: "text",
-          text: replyText
-        }
-      ],
+      replies: [{ type: "text", text: replyText }],
       agent_id: ASSISTANT_ID,
       model_used: OPENAI_MODEL
     });
 
   } catch (err) {
-    console.error("❌ Error:", err.message);
+    console.error("❌ Error:", err);
     res.status(500).json({
-      replies: [
-        {
-          type: "text",
-          text: "Sorry, something went wrong while processing your request."
-        }
-      ],
+      replies: [{ type: "text", text: "Sorry, something went wrong." }],
       agent_id: ASSISTANT_ID,
       model_used: OPENAI_MODEL
     });
