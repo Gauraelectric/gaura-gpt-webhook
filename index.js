@@ -50,7 +50,7 @@ app.post("/webhook", async (req, res) => {
     );
     const runId = runRes.data.id;
 
-    // 4. Poll until completed (or timeout after ~10 seconds)
+    // 4. Poll until completed (or timeout after ~20 seconds)
     let status = "in_progress";
     let runCheck;
     for (let i = 0; i < 10 && (status === "in_progress" || status === "queued"); i++) {
