@@ -15,12 +15,12 @@ app.post("/webhook", async (req, res) => {
   try {
     console.log("📩 Incoming request body:", JSON.stringify(req.body, null, 2));
 
-    // ✅ Extract user message from SalesIQ payload
+    // ✅ Extract user message
     const userMessage = req.body?.message?.text || "Hello";
     console.log("💬 Parsed user message:", userMessage);
 
-    // ✅ Step 1: Create a thread
-    const threadResponse = await axios.post(
+    // ✅ Create thread
+    const threadRes = await axios.post(
       "https://api.openai.com/v1/threads",
       {},
       {
@@ -31,9 +31,9 @@ app.post("/webhook", async (req, res) => {
         }
       }
     );
-    const thread_id = threadResponse.data.id;
+    const thread_id = threadRes.data.id;
 
-    // ✅ Step 2: Add user message
+    // ✅ Post user message
     await axios.post(
       `https://api.openai.com/v1/threads/${thread_id}/messages`,
       {
@@ -49,8 +49,8 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    // ✅ Step 3: Run assistant
-    const runResponse = await axios.post(
+    // ✅ Trigger assistant run
+    const runRes = await axios.post(
       `https://api.openai.com/v1/threads/${thread_id}/runs`,
       {
         assistant_id: ASSISTANT_ID
@@ -64,13 +64,14 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    // ✅ Step 4: Poll until status is 'completed'
+    // ✅ Poll status — fast polling (max 5 attempts, 500ms delay)
     let runStatus = "in_progress";
     let runCheck;
-    while (runStatus === "in_progress" || runStatus === "queued") {
-      await new Promise(resolve => setTimeout(resolve, 1500));
+    let attempts = 0;
+    while ((runStatus === "in_progress" || runStatus === "queued") && attempts < 5) {
+      await new Promise(resolve => setTimeout(resolve, 500));
       runCheck = await axios.get(
-        `https://api.openai.com/v1/threads/${thread_id}/runs/${runResponse.data.id}`,
+        `https://api.openai.com/v1/threads/${thread_id}/runs/${runRes.data.id}`,
         {
           headers: {
             Authorization: `Bearer ${OPENAI_API_KEY}`,
@@ -80,26 +81,31 @@ app.post("/webhook", async (req, res) => {
         }
       );
       runStatus = runCheck.data.status;
+      attempts++;
     }
 
-    // ✅ Step 5: Get AI reply
-    const messagesResponse = await axios.get(
-      `https://api.openai.com/v1/threads/${thread_id}/messages`,
-      {
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "OpenAI-Beta": "assistants=v2",
-          "Content-Type": "application/json"
+    let replyText = "I'm still thinking... Please ask again.";
+
+    // ✅ Fetch messages only if completed
+    if (runStatus === "completed") {
+      const msgRes = await axios.get(
+        `https://api.openai.com/v1/threads/${thread_id}/messages`,
+        {
+          headers: {
+            Authorization: `Bearer ${OPENAI_API_KEY}`,
+            "OpenAI-Beta": "assistants=v2",
+            "Content-Type": "application/json"
+          }
         }
-      }
-    );
+      );
 
-    const aiResponse = messagesResponse.data.data.find(msg => msg.role === "assistant");
-    const replyText = aiResponse?.content?.[0]?.text?.value || "Sorry, I couldn't find an answer.";
+      const aiMessage = msgRes.data.data.find(msg => msg.role === "assistant");
+      replyText = aiMessage?.content?.[0]?.text?.value || replyText;
+    }
 
-    console.log("🤖 AI replyText:", replyText);
+    console.log("🤖 Final AI reply:", replyText);
 
-    // ✅ Respond in correct Zoho SalesIQ format
+    // ✅ Respond to Zoho SalesIQ
     res.json({
       replies: [
         {
@@ -108,13 +114,13 @@ app.post("/webhook", async (req, res) => {
         }
       ]
     });
-  } catch (error) {
-    console.error("❌ Error:", error.message);
+  } catch (err) {
+    console.error("❌ Error in webhook:", err.message);
     res.status(500).json({
       replies: [
         {
           type: "text",
-          text: "Oops! Something went wrong while processing your message."
+          text: "Sorry, there was an error processing your message. Please try again."
         }
       ]
     });
@@ -122,5 +128,5 @@ app.post("/webhook", async (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`🚀 Server is live on port ${port}`);
+  console.log(`🚀 Server is running on port ${port}`);
 });
