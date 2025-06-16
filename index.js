@@ -1,82 +1,122 @@
 const express = require("express");
 const bodyParser = require("body-parser");
+const axios = require("axios");
+require("dotenv").config();
 
 const app = express();
 const port = process.env.PORT || 3000;
 
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const ASSISTANT_ID = process.env.ASSISTANT_ID;
+
 app.use(bodyParser.json());
 
-// Catch and log any uncaught exceptions.
-process.on("uncaughtException", (err) => {
-  console.error("❌ UNCAUGHT EXCEPTION:", err.stack || err);
-});
+app.post("/webhook", async (req, res) => {
+  try {
+    console.log("Incoming request body:", JSON.stringify(req.body, null, 2));
 
-// Health-check route.
-app.get("/", (req, res) => {
-  console.log("🟢 GET / hit");
-  res.send("Minimal server running");
-});
+    // ✅ Extract message from Zoho SalesIQ payload
+    const userMessage = req.body?.message?.text || "Hello";
+    console.log("Parsed user message:", userMessage);
 
-// Main webhook endpoint for Zoho SalesIQ.
-app.post("/webhook", (req, res) => {
-  console.log("📩 Webhook called!");
-  console.log("🔍 Request body:", JSON.stringify(req.body, null, 2));
+    // ✅ Step 1: Create thread
+    const threadResponse = await axios.post(
+      "https://api.openai.com/v1/threads",
+      {},
+      {
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "OpenAI-Beta": "assistants=v2",
+          "Content-Type": "application/json"
+        }
+      }
+    );
+    const thread_id = threadResponse.data.id;
 
-  const handler = req.body.handler; // Expecting "trigger" or "message"
+    // ✅ Step 2: Post user's message
+    await axios.post(
+      `https://api.openai.com/v1/threads/${thread_id}/messages`,
+      {
+        role: "user",
+        content: userMessage
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "OpenAI-Beta": "assistants=v2",
+          "Content-Type": "application/json"
+        }
+      }
+    );
 
-  // Handle the "trigger" event (welcome message).
-  if (handler === "trigger") {
-    console.log("✨ Trigger event received – sending welcome message!");
-    return res.status(200).json({
+    // ✅ Step 3: Run assistant
+    const runResponse = await axios.post(
+      `https://api.openai.com/v1/threads/${thread_id}/runs`,
+      {
+        assistant_id: ASSISTANT_ID
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "OpenAI-Beta": "assistants=v2",
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    // ✅ Step 4: Poll until completion
+    let runStatus = "in_progress";
+    let runCheck;
+
+    while (runStatus === "in_progress" || runStatus === "queued") {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      runCheck = await axios.get(
+        `https://api.openai.com/v1/threads/${thread_id}/runs/${runResponse.data.id}`,
+        {
+          headers: {
+            Authorization: `Bearer ${OPENAI_API_KEY}`,
+            "OpenAI-Beta": "assistants=v2",
+            "Content-Type": "application/json"
+          }
+        }
+      );
+      runStatus = runCheck.data.status;
+    }
+
+    // ✅ Step 5: Fetch assistant response
+    const messagesResponse = await axios.get(
+      `https://api.openai.com/v1/threads/${thread_id}/messages`,
+      {
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "OpenAI-Beta": "assistants=v2",
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    const aiResponse = messagesResponse.data.data.find((msg) => msg.role === "assistant");
+    const replyText = aiResponse?.content?.[0]?.text?.value || "No reply received.";
+    console.log("AI replyText:", replyText);
+
+    // ✅ Format response for Zoho Zobot webhook
+    res.json({
       action: "reply",
       replies: [
         {
           type: "text",
-          value:
-            "Welcome to Gaura Electric! I'm your digital assistant. How can I help you today?"
+          value: replyText
         }
       ]
     });
-  }
-  // Handle the "message" event (visitor has sent a question).
-  else if (handler === "message") {
-    const question = req.body.question;
-    console.log("💬 Message event received – question:", question);
-
-    if (question && question.trim() !== "") {
-      // Example: Echo the visitor's question back.
-      return res.status(200).json({
-        action: "reply",
-        replies: [
-          {
-            type: "text",
-            value: `You asked: ${question}`
-          }
-        ]
-      });
-    } else {
-      // Fallback when the question is missing or blank.
-      return res.status(200).json({
-        action: "reply",
-        replies: [
-          {
-            type: "text",
-            value:
-              "I did not receive a valid question. Please type your query again."
-          }
-        ]
-      });
-    }
-  }
-  // Handle an unknown or missing handler type.
-  else {
-    console.log("⚠️ Unknown handler:", handler);
-    return res.status(200).json({
+  } catch (error) {
+    console.error("Error:", error.message);
+    res.status(500).json({
       action: "reply",
       replies: [
         {
           type: "text",
-          value: "Unknown handler. Please try again."
+          value: "Oops! Something went wrong while processing your message."
         }
       ]
     });
@@ -84,5 +124,5 @@ app.post("/webhook", (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`✅ Server running on port ${port}`);
+  console.log(`🚀 Server is live on port ${port}`);
 });
