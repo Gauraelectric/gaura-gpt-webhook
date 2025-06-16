@@ -8,19 +8,21 @@ const port = process.env.PORT || 3000;
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const ASSISTANT_ID = process.env.ASSISTANT_ID;
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini"; // Optional tracking/logging only
 
 app.use(bodyParser.json());
 
 app.post("/webhook", async (req, res) => {
   try {
-    console.log("📩 Incoming request body:", JSON.stringify(req.body, null, 2));
+    console.log("📩 Incoming request:", JSON.stringify(req.body, null, 2));
+    const userMessage = req.body?.message?.text || req.body?.question || "Hello";
 
-    // ✅ Extract user message from SalesIQ payload
-    const userMessage = req.body?.message?.text || "Hello";
-    console.log("💬 Parsed user message:", userMessage);
+    console.log("💬 User input:", userMessage);
+    console.log("🎯 Assistant ID:", ASSISTANT_ID);
+    console.log("🤖 Model:", OPENAI_MODEL);
 
-    // ✅ Step 1: Create a thread for this conversation
-    const threadResponse = await axios.post(
+    // Step 1: Create thread
+    const threadRes = await axios.post(
       "https://api.openai.com/v1/threads",
       {},
       {
@@ -31,9 +33,9 @@ app.post("/webhook", async (req, res) => {
         }
       }
     );
-    const thread_id = threadResponse.data.id;
+    const thread_id = threadRes.data.id;
 
-    // ✅ Step 2: Post user's message to OpenAI
+    // Step 2: Add user message to thread
     await axios.post(
       `https://api.openai.com/v1/threads/${thread_id}/messages`,
       {
@@ -49,8 +51,8 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    // ✅ Step 3: Run assistant to generate response
-    const runResponse = await axios.post(
+    // Step 3: Run assistant
+    const runRes = await axios.post(
       `https://api.openai.com/v1/threads/${thread_id}/runs`,
       {
         assistant_id: ASSISTANT_ID
@@ -64,55 +66,72 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    // ✅ Step 4: Poll OpenAI until response is ready
+    // Step 4: Poll status up to 10 attempts (5s)
     let runStatus = "in_progress";
+    let attempts = 0;
     let runCheck;
-    
-    while (runStatus === "in_progress" || runStatus === "queued") {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+    while ((runStatus === "in_progress" || runStatus === "queued") && attempts < 10) {
+      await new Promise(resolve => setTimeout(resolve, 500));
       runCheck = await axios.get(
-        `https://api.openai.com/v1/threads/${thread_id}/runs/${runResponse.data.id}`,
+        `https://api.openai.com/v1/threads/${thread_id}/runs/${runRes.data.id}`,
         {
           headers: {
             Authorization: `Bearer ${OPENAI_API_KEY}`,
-            "OpenAI-Beta": "assistants=v2",
-            "Content-Type": "application/json"
+            "OpenAI-Beta": "assistants=v2"
           }
         }
       );
       runStatus = runCheck.data.status;
+      attempts++;
     }
 
-    // ✅ Step 5: Fetch AI response from OpenAI
-    const messagesResponse = await axios.get(
-      `https://api.openai.com/v1/threads/${thread_id}/messages`,
-      {
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "OpenAI-Beta": "assistants=v2",
-          "Content-Type": "application/json"
+    let replyText = "Sorry, still processing... please try again.";
+
+    // Step 5: If completed, fetch response
+    if (runStatus === "completed") {
+      const msgRes = await axios.get(
+        `https://api.openai.com/v1/threads/${thread_id}/messages`,
+        {
+          headers: {
+            Authorization: `Bearer ${OPENAI_API_KEY}`,
+            "OpenAI-Beta": "assistants=v2"
+          }
         }
-      }
-    );
+      );
 
-    const aiResponse = messagesResponse.data.data.find((msg) => msg.role === "assistant");
-    const replyText = aiResponse?.content?.[0]?.text?.value || "No reply received.";
-    console.log("🤖 AI replyText:", replyText);
+      const aiMessage = msgRes.data.data.find(msg => msg.role === "assistant");
+      replyText = aiMessage?.content?.[0]?.text?.value || replyText;
+    }
 
-    // ✅ Format response for Zoho SalesIQ
+    console.log("✅ Final reply:", replyText);
+
+    // Step 6: Send formatted response to SalesIQ
     res.json({
-      statusCode: 200, // ✅ Explicit status code for SalesIQ compatibility
-      message: replyText // ✅ Some bots prefer "message" over "replies"
+      replies: [
+        {
+          type: "text",
+          text: replyText
+        }
+      ],
+      agent_id: ASSISTANT_ID,
+      model_used: OPENAI_MODEL
     });
-  } catch (error) {
-    console.error("❌ Error:", error.message);
+
+  } catch (err) {
+    console.error("❌ Error:", err.message);
     res.status(500).json({
-      statusCode: 500, // Explicit error handling
-      message: "Oops! Something went wrong while processing your message."
+      replies: [
+        {
+          type: "text",
+          text: "Sorry, something went wrong while processing your request."
+        }
+      ],
+      agent_id: ASSISTANT_ID,
+      model_used: OPENAI_MODEL
     });
   }
 });
 
 app.listen(port, () => {
-  console.log(`🚀 Server is live on port ${port}`);
+  console.log(`🚀 Server running on port ${port}`);
 });
